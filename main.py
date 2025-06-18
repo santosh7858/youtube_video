@@ -5,26 +5,33 @@ import os
 
 app = Flask(__name__)
 
+
 def build_thumbnail_url(video_id):
     return f"https://i.ytimg.com/vi/{video_id}/hq720.jpg"
+
 
 @app.route('/')
 def home():
     return "✅ YouTube Metadata API is Live!"
 
+
 @app.route('/search')
 def search_youtube():
     query = request.args.get('q')
     limit = int(request.args.get('limit', 10))
+    page = int(request.args.get('page', 1))
 
     if not query:
         return jsonify({'error': 'Missing search query'}), 400
+
+    offset = (page - 1) * limit
+    total_limit = offset + limit
 
     cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
 
     cmd = [
         "yt-dlp",
-        f"ytsearch{limit}:{query}",
+        f"ytsearch{total_limit}:{query}",
         "--cookies", cookie_path,
         "--dump-json",
         "--skip-download",
@@ -34,6 +41,9 @@ def search_youtube():
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
+
+        # Get paginated results
+        videos = videos[offset:offset + limit]
 
         seen_ids = set()
         unique_videos = []
@@ -107,5 +117,7 @@ def related_videos():
     except json.JSONDecodeError:
         return jsonify({'error': 'Failed to parse related videos'}), 500
 
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(debug=True, host='0.0.0.0', port=port)
