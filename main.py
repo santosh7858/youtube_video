@@ -5,14 +5,17 @@ import os
 
 app = Flask(__name__)
 
+def build_thumbnail_url(video_id):
+    return f"https://i.ytimg.com/vi/{video_id}/hq720.jpg"
+
 @app.route('/')
 def home():
-    return "✅ YouTube Metadata API (Search & Related) is Live!"
+    return "✅ YouTube Metadata API is Live!"
 
 @app.route('/search')
 def search_youtube():
     query = request.args.get('q')
-    limit = int(request.args.get('limit', 10))  # Default limit = 10
+    limit = int(request.args.get('limit', 10))
 
     if not query:
         return jsonify({'error': 'Missing search query'}), 400
@@ -32,16 +35,26 @@ def search_youtube():
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
 
-        simplified = [{
-            "title": v.get("title"),
-            "description": v.get("description"),
-            "duration": v.get("duration"),
-            "thumbnail": v.get("thumbnail"),
-            "author": v.get("uploader"),
-            "author_logo": v.get("channel_thumbnail"),
-        } for v in videos]
+        seen_ids = set()
+        unique_videos = []
+        for v in videos:
+            vid = v.get("id")
+            if vid in seen_ids:
+                continue
+            seen_ids.add(vid)
 
-        return jsonify({'results': simplified})
+            unique_videos.append({
+                "video_id": vid,
+                "title": v.get("title"),
+                "description": v.get("description"),
+                "duration": v.get("duration"),
+                "thumbnail": build_thumbnail_url(vid),
+                "author": v.get("uploader"),
+                "author_logo": v.get("channel_thumbnail")
+            })
+
+        return jsonify({'results': unique_videos})
+
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
 
@@ -68,18 +81,27 @@ def related_videos():
         data = json.loads(result.stdout)
         related = data.get("related_videos", [])[:10]
 
+        seen_ids = set()
         simplified = []
+
         for v in related:
+            vid = v.get("id")
+            if not vid or vid in seen_ids:
+                continue
+            seen_ids.add(vid)
+
             simplified.append({
+                "video_id": vid,
                 "title": v.get("title"),
                 "description": v.get("short_description"),
                 "duration": v.get("length_seconds"),
-                "thumbnail": v.get("thumbnails", [{}])[-1].get("url"),
+                "thumbnail": build_thumbnail_url(vid),
                 "author": v.get("author"),
-                "author_logo": v.get("channel_thumbnail", [{}])[-1].get("url"),
+                "author_logo": v.get("channel_thumbnail", [{}])[-1].get("url")
             })
 
         return jsonify({'related_videos': simplified})
+
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
     except json.JSONDecodeError:
