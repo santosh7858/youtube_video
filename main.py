@@ -5,13 +5,13 @@ import json
 import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for AJAX
+CORS(app)  # Allow AJAX requests from browser
 
 def build_thumbnail_url(video_id):
     return f"https://i.ytimg.com/vi/{video_id}/hq720.jpg"
 
 @app.route('/')
-def home():
+def index():
     return "✅ YouTube Metadata API is Live!"
 
 @app.route('/search')
@@ -26,39 +26,32 @@ def search_youtube():
     offset = (page - 1) * limit
     total_limit = offset + limit
 
-    cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
+    cookie_file = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
 
     cmd = [
         "yt-dlp",
         f"ytsearch{total_limit}:{query}",
-        "--cookies", cookie_path,
+        "--cookies", cookie_file,
         "--dump-json",
         "--skip-download",
         "--no-warnings"
     ]
 
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        lines = result.stdout.strip().split("\n")
+        videos = [json.loads(line) for line in lines[offset:offset + limit]]
 
-        videos = []
-        for line in result.stdout.strip().split("\n"):
-            try:
-                v = json.loads(line)
-                videos.append(v)
-            except json.JSONDecodeError:
-                continue
+        seen = set()
+        clean_videos = []
 
-        videos = videos[offset:offset + limit]
-
-        seen_ids = set()
-        unique_videos = []
         for v in videos:
             vid = v.get("id")
-            if vid in seen_ids:
+            if vid in seen:
                 continue
-            seen_ids.add(vid)
+            seen.add(vid)
 
-            unique_videos.append({
+            clean_videos.append({
                 "video_id": vid,
                 "title": v.get("title"),
                 "description": v.get("description"),
@@ -68,11 +61,12 @@ def search_youtube():
                 "author_logo": (v.get("channel_thumbnail") or [{}])[-1].get("url")
             })
 
-        return jsonify({'results': unique_videos})
+        return jsonify({'results': clean_videos})
 
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
-
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid YouTube response'}), 500
 
 @app.route('/related')
 def related_videos():
@@ -80,30 +74,30 @@ def related_videos():
     if not video_id:
         return jsonify({'error': 'Missing video ID'}), 400
 
-    cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
+    cookie_file = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
 
     cmd = [
         "yt-dlp",
         f"https://www.youtube.com/watch?v={video_id}",
-        "--cookies", cookie_path,
+        "--cookies", cookie_file,
         "--dump-single-json",
         "--no-warnings",
         "--extractor-args", "youtube:player_client=web"
     ]
 
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(result.stdout)
         related = data.get("related_videos", [])[:10]
 
-        seen_ids = set()
+        seen = set()
         simplified = []
 
         for v in related:
             vid = v.get("id")
-            if not vid or vid in seen_ids:
+            if not vid or vid in seen:
                 continue
-            seen_ids.add(vid)
+            seen.add(vid)
 
             simplified.append({
                 "video_id": vid,
@@ -120,9 +114,8 @@ def related_videos():
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
     except json.JSONDecodeError:
-        return jsonify({'error': 'Failed to parse related videos'}), 500
-
+        return jsonify({'error': 'Invalid related video data'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    app.run(debug=False, host='0.0.0.0', port=port)
