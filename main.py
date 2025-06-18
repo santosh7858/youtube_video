@@ -7,11 +7,13 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "✅ YouTube Search & Related API is Live!"
+    return "✅ YouTube API (Search & Related) is Live!"
 
 @app.route('/search')
 def search_youtube():
     query = request.args.get('q')
+    limit = int(request.args.get('limit', 10))  # Default: 10
+
     if not query:
         return jsonify({'error': 'Missing search query'}), 400
 
@@ -19,7 +21,7 @@ def search_youtube():
 
     cmd = [
         "yt-dlp",
-        f"ytsearch10:{query}",
+        f"ytsearch{limit}:{query}",
         "--cookies", cookie_path,
         "--dump-json",
         "--skip-download",
@@ -29,16 +31,18 @@ def search_youtube():
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
+
         simplified = [{
             "title": v.get("title"),
             "video_id": v.get("id"),
             "url": v.get("webpage_url"),
-            "duration": v.get("duration"),
             "thumbnail": v.get("thumbnail")
         } for v in videos]
+
         return jsonify({'results': simplified})
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
+
 
 @app.route('/related')
 def related_videos():
@@ -60,13 +64,15 @@ def related_videos():
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         data = json.loads(result.stdout)
-        related = data.get("related_videos", [])
+        related = data.get("related_videos", [])[:10]  # LIMIT to first 10 videos
+
         simplified = [{
             "title": v.get("title"),
             "video_id": v.get("id"),
             "url": f"https://www.youtube.com/watch?v={v.get('id')}",
             "thumbnails": v.get("thumbnails")
         } for v in related]
+
         return jsonify({'related_videos': simplified})
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
