@@ -7,12 +7,12 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "✅ YouTube API (Search & Related) is Live!"
+    return "✅ YouTube Metadata API (Search & Related) is Live!"
 
 @app.route('/search')
 def search_youtube():
     query = request.args.get('q')
-    limit = int(request.args.get('limit', 10))  # Default: 10
+    limit = int(request.args.get('limit', 10))  # Default limit = 10
 
     if not query:
         return jsonify({'error': 'Missing search query'}), 400
@@ -34,9 +34,11 @@ def search_youtube():
 
         simplified = [{
             "title": v.get("title"),
-            "video_id": v.get("id"),
-            "url": v.get("webpage_url"),
-            "thumbnail": v.get("thumbnail")
+            "description": v.get("description"),
+            "duration": v.get("duration"),
+            "thumbnail": v.get("thumbnail"),
+            "author": v.get("uploader"),
+            "author_logo": v.get("channel_thumbnail"),
         } for v in videos]
 
         return jsonify({'results': simplified})
@@ -64,14 +66,18 @@ def related_videos():
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         data = json.loads(result.stdout)
-        related = data.get("related_videos", [])[:10]  # LIMIT to first 10 videos
+        related = data.get("related_videos", [])[:10]
 
-        simplified = [{
-            "title": v.get("title"),
-            "video_id": v.get("id"),
-            "url": f"https://www.youtube.com/watch?v={v.get('id')}",
-            "thumbnails": v.get("thumbnails")
-        } for v in related]
+        simplified = []
+        for v in related:
+            simplified.append({
+                "title": v.get("title"),
+                "description": v.get("short_description"),
+                "duration": v.get("length_seconds"),
+                "thumbnail": v.get("thumbnails", [{}])[-1].get("url"),
+                "author": v.get("author"),
+                "author_logo": v.get("channel_thumbnail", [{}])[-1].get("url"),
+            })
 
         return jsonify({'related_videos': simplified})
     except subprocess.CalledProcessError as e:
