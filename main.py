@@ -1,83 +1,77 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
 import subprocess
 import json
+import os
 
-app = FastAPI()
+app = Flask(__name__)
 
-# CORS setup
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Change to your frontend URL in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.route('/')
+def home():
+    return "✅ YouTube Search & Related API is Live!"
 
-COOKIES_FILE = "youtube_cookies.txt"
+@app.route('/search')
+def search_youtube():
+    query = request.args.get('q')
+    if not query:
+        return jsonify({'error': 'Missing search query'}), 400
 
-def run_yt_dlp(command_args):
-    try:
-        result = subprocess.run(
-            command_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        return json.loads(result.stdout)
-    except subprocess.CalledProcessError as e:
-        return {"error": e.stderr.strip()}
+    cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
 
-
-@app.get("/related")
-def get_related_videos(video_id: str = Query(..., description="YouTube video ID")):
     cmd = [
         "yt-dlp",
-        f"https://www.youtube.com/watch?v={video_id}",
-        "--cookies", COOKIES_FILE,
-        "--flat-playlist",
+        f"ytsearch10:{query}",
+        "--cookies", cookie_path,
         "--dump-json",
         "--skip-download",
-        "--extractor-args", "youtube:player_client=web",
-        "--no-warnings",
-        "--print", "%(related_videos_json)s"
-    ]
-
-    result = run_yt_dlp(cmd)
-
-    if "error" in result:
-        return {"status": "error", "message": result["error"]}
-    
-    try:
-        # related_videos_json is a stringified JSON list
-        related = json.loads(result)
-        return {"status": "success", "related_videos": related}
-    except:
-        return {"status": "error", "message": "No related videos found or parsing failed."}
-
-
-@app.get("/search")
-def search_youtube(q: str = Query(..., description="Search query")):
-    cmd = [
-        "yt-dlp",
-        f"ytsearch10:{q}",
-        "--cookies", COOKIES_FILE,
-        "--dump-json",
-        "--skip-download",
-        "--extractor-args", "youtube:player_client=web",
         "--no-warnings"
     ]
 
     try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
-        return {"status": "success", "results": videos}
+        simplified = [{
+            "title": v.get("title"),
+            "video_id": v.get("id"),
+            "url": v.get("webpage_url"),
+            "duration": v.get("duration"),
+            "thumbnail": v.get("thumbnail")
+        } for v in videos]
+        return jsonify({'results': simplified})
     except subprocess.CalledProcessError as e:
-        return {"status": "error", "message": e.stderr.strip()}
+        return jsonify({'error': e.stderr.strip()}), 500
+
+@app.route('/related')
+def related_videos():
+    video_id = request.args.get('video_id')
+    if not video_id:
+        return jsonify({'error': 'Missing video ID'}), 400
+
+    cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
+
+    cmd = [
+        "yt-dlp",
+        f"https://www.youtube.com/watch?v={video_id}",
+        "--cookies", cookie_path,
+        "--dump-single-json",
+        "--no-warnings",
+        "--extractor-args", "youtube:player_client=web"
+    ]
+
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        data = json.loads(result.stdout)
+        related = data.get("related_videos", [])
+        simplified = [{
+            "title": v.get("title"),
+            "video_id": v.get("id"),
+            "url": f"https://www.youtube.com/watch?v={v.get('id')}",
+            "thumbnails": v.get("thumbnails")
+        } for v in related]
+        return jsonify({'related_videos': simplified})
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': e.stderr.strip()}), 500
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Failed to parse related videos'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
