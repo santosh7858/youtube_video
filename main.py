@@ -1,19 +1,18 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import subprocess
 import json
 import os
 
 app = Flask(__name__)
-
+CORS(app)  # Enable CORS for AJAX
 
 def build_thumbnail_url(video_id):
     return f"https://i.ytimg.com/vi/{video_id}/hq720.jpg"
 
-
 @app.route('/')
 def home():
     return "✅ YouTube Metadata API is Live!"
-
 
 @app.route('/search')
 def search_youtube():
@@ -40,9 +39,15 @@ def search_youtube():
 
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
 
-        # Get paginated results
+        videos = []
+        for line in result.stdout.strip().split("\n"):
+            try:
+                v = json.loads(line)
+                videos.append(v)
+            except json.JSONDecodeError:
+                continue
+
         videos = videos[offset:offset + limit]
 
         seen_ids = set()
@@ -60,7 +65,7 @@ def search_youtube():
                 "duration": v.get("duration"),
                 "thumbnail": build_thumbnail_url(vid),
                 "author": v.get("uploader"),
-                "author_logo": v.get("channel_thumbnail")
+                "author_logo": (v.get("channel_thumbnail") or [{}])[-1].get("url")
             })
 
         return jsonify({'results': unique_videos})
@@ -107,7 +112,7 @@ def related_videos():
                 "duration": v.get("length_seconds"),
                 "thumbnail": build_thumbnail_url(vid),
                 "author": v.get("author"),
-                "author_logo": v.get("channel_thumbnail", [{}])[-1].get("url")
+                "author_logo": (v.get("channel_thumbnail") or [{}])[-1].get("url")
             })
 
         return jsonify({'related_videos': simplified})
