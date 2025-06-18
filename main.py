@@ -16,15 +16,18 @@ def home():
 def search_youtube():
     query = request.args.get('q')
     limit = int(request.args.get('limit', 10))
+    page = int(request.args.get('page', 1))
 
     if not query:
         return jsonify({'error': 'Missing search query'}), 400
 
     cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
 
+    total_limit = limit * page
+
     cmd = [
         "yt-dlp",
-        f"ytsearch{limit}:{query}",
+        f"ytsearch{total_limit}:{query}",
         "--cookies", cookie_path,
         "--dump-json",
         "--skip-download",
@@ -33,11 +36,16 @@ def search_youtube():
 
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
+        all_videos = [json.loads(line) for line in result.stdout.strip().split("\n")]
+
+        # Get only the page slice
+        start_index = (page - 1) * limit
+        end_index = start_index + limit
+        selected_videos = all_videos[start_index:end_index]
 
         seen_ids = set()
         unique_videos = []
-        for v in videos:
+        for v in selected_videos:
             vid = v.get("id")
             if vid in seen_ids:
                 continue
@@ -57,7 +65,6 @@ def search_youtube():
 
     except subprocess.CalledProcessError as e:
         return jsonify({'error': e.stderr.strip()}), 500
-
 
 @app.route('/related')
 def related_videos():
